@@ -1,0 +1,19 @@
+{
+    "name": "pdf-generator/backend",
+    "description": "PDF Generator System Backend",
+    "type": "project",
+    "require": {
+        "php": ">=8.0",
+        "tecnickcom/tcpdf": "^6.6",
+        "phpmailer/phpmailer": "^6.8"
+    },
+    "autoload": {
+        "files": [
+            "includes/config.php",
+            "includes/db.php",
+            "includes/auth_middleware.php",
+            "includes/helpers.php"
+        ]
+    }
+}
+
