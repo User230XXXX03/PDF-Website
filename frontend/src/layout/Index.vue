@@ -2,9 +2,13 @@
   <el-container class="layout-container">
     <el-header class="header">
       <div class="header-left">
+        <div class="mobile-toggle" @click="menuOpen = !menuOpen">
+          <el-icon :size="22"><Fold v-if="menuOpen" /><Expand v-else /></el-icon>
+        </div>
         <h2>PDF Generator System</h2>
       </div>
       <el-menu
+        v-show="!isMobile || menuOpen"
         :default-active="activeMenu"
         :mode="menuMode"
         :ellipsis="false"
@@ -34,7 +38,7 @@
           <span>Settings</span>
         </el-menu-item>
       </el-menu>
-      <div class="header-right">
+      <div v-show="!isMobile || menuOpen" class="header-right">
         <div class="dark-mode-toggle" @click="toggleDarkMode" :title="isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'">
           <el-icon :size="18" v-if="isDark"><Sunny /></el-icon>
           <el-icon :size="18" v-else><Moon /></el-icon>
@@ -66,7 +70,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Sunny, Moon } from '@element-plus/icons-vue'
+import { Sunny, Moon, Fold, Expand } from '@element-plus/icons-vue'
 import { logout, getCurrentUser } from '../api/auth'
 import { getDashboardStats } from '../api/dashboard'
 
@@ -77,6 +81,7 @@ const username = ref('')
 const templatesCount = ref(0)
 const batchesCount = ref(0)
 const isDark = ref(false)
+const menuOpen = ref(false)
 const windowWidth = ref(window.innerWidth)
 
 const isMobile = computed(() => windowWidth.value <= 768)
@@ -136,6 +141,7 @@ async function loadStats() {
 }
 
 function handleMenuSelect(index) {
+  if (isMobile.value) menuOpen.value = false
   router.push(index)
 }
 
@@ -259,7 +265,14 @@ async function handleCommand(command) {
   user-select: none;
 }
 
-@media (max-width: 992px) {
+.mobile-toggle {
+  display: none;
+  cursor: pointer;
+  padding: 4px;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+@media (max-width: 1140px) {
   .header {
     flex-wrap: wrap;
     height: auto;
@@ -303,6 +316,11 @@ async function handleCommand(command) {
 
 @media (max-width: 768px) {
   /* Stack header vertically on mobile */
+  .layout-container {
+    height: auto;
+    min-height: 100vh;
+  }
+
   .header {
     flex-direction: column;
     align-items: stretch;
@@ -313,12 +331,21 @@ async function handleCommand(command) {
   .header-left {
     margin-right: 0;
     padding: 6px 16px 10px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    display: flex;
+    align-items: center;
+    gap: 12px;
   }
 
   .header-left h2 {
-    font-size: 17px;
+    font-size: 16px;
     text-align: center;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .mobile-toggle {
+    display: flex;
   }
 
   /* Vertical menu — full width, items stacked */

@@ -122,41 +122,20 @@
         <el-form-item label="Records" v-if="selectedTemplate">
           <div class="records-section">
             <div class="records-toolbar">
-              <div class="toolbar-left">
-                <el-button size="small" @click="addRecord">
-                  <el-icon><Plus /></el-icon>
-                  Add Record
-                </el-button>
-                <el-button type="primary" size="small" @click="downloadTemplateFile('excel')">
-                  Download Excel Template
-                </el-button>
-                <el-button type="primary" size="small" @click="downloadTemplateFile('csv')">
-                  Download CSV Template
-                </el-button>
-                <el-button type="success" size="small" @click="handleImportClick('excel')">
-                  Import Excel
-                </el-button>
-                <el-button type="success" size="small" @click="handleImportClick('csv')">
-                  Import CSV
-                </el-button>
-                <el-button size="small" type="success" @click="generateTestData">
-                  <el-icon><MagicStick /></el-icon>
-                  Generate Test Data
-                </el-button>
-                <el-button size="small" type="warning" @click="clearAllRecords" :disabled="form.records.length === 0">
-                  <el-icon><Delete /></el-icon>
-                  Clear All
-                </el-button>
-              </div>
+              <el-button size="small" @click="addRecord">
+                <el-icon><Plus /></el-icon>
+                Add Record
+              </el-button>
+              <el-button size="small" type="success" @click="generateTestData">
+                <el-icon><MagicStick /></el-icon>
+                Generate Test Data
+              </el-button>
+              <el-button size="small" type="warning" @click="clearAllRecords">
+                <el-icon><Delete /></el-icon>
+                Clear All
+              </el-button>
               <span class="record-count">{{ form.records.length + ' records' }}</span>
             </div>
-            <input
-              ref="fileInputRef"
-              type="file"
-              accept=".xlsx,.xls,.csv"
-              style="display: none"
-              @change="handleFileImport"
-            />
 
             <!-- Data Records Table (unified display) -->
             <el-table :data="form.records" border style="margin-top: 10px">
@@ -206,8 +185,6 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { MagicStick, Delete } from '@element-plus/icons-vue'
 import { getBatch, createBatch, updateBatch } from '../api/batch'
 import { getTemplates } from '../api/template'
-import * as XLSX from 'xlsx'
-import Papa from 'papaparse'
 
 const router = useRouter()
 const route = useRoute()
@@ -216,8 +193,6 @@ const loading = ref(false)
 const templates = ref([])
 const selectedVariableForSubject = ref(null)
 const selectedVariableForBody = ref(null)
-const fileInputRef = ref(null)
-const importFileType = ref(null)
 
 const isEdit = computed(() => !!route.params.id)
 
@@ -241,11 +216,12 @@ const selectedTemplate = computed(() => {
   return templates.value.find(t => t.id === form.template_id)
 })
 
-// Check if it's a personalized template (transcript, each person receives their own)
+// Check if it's a personalized template (transcript/payroll, each person receives their own)
 const isPersonalizedTemplate = computed(() => {
   if (!selectedTemplate.value) return false
   const type = selectedTemplate.value.set_type?.toLowerCase() || ''
-  return type === 'transcript'
+  // Transcript and Payroll need personalized sending
+  return type === 'transcript' || type === 'payroll'
 })
 
 // Get available template variables - only show variables suitable for emails
@@ -273,13 +249,27 @@ const availableVariables = computed(() => {
   })
 })
 
+// Insert variable into email subject or body
 function insertVariable(field, variable) {
   if (!variable) return
+  
   const varText = `{{${variable}}}`
-  const key = field === 'subject' ? 'subject' : 'body'
-  form.email_config[key] = form.email_config[key] ? form.email_config[key] + ' ' + varText : varText
-  if (field === 'subject') selectedVariableForSubject.value = null
-  else selectedVariableForBody.value = null
+  
+  if (field === 'subject') {
+    if (!form.email_config.subject) {
+      form.email_config.subject = varText
+    } else {
+      form.email_config.subject += ' ' + varText
+    }
+    selectedVariableForSubject.value = null
+  } else if (field === 'body') {
+    if (!form.email_config.body) {
+      form.email_config.body = varText
+    } else {
+      form.email_config.body += ' ' + varText
+    }
+    selectedVariableForBody.value = null
+  }
 }
 
 onMounted(async () => {
@@ -412,14 +402,14 @@ function generateTestData() {
     ElMessage.warning('Please select a template first')
     return
   }
-
+  
   const variables = selectedTemplate.value.variables || []
-
+  
   if (variables.length === 0) {
     ElMessage.warning('This template has no defined variables')
     return
   }
-
+  
   generateTranscriptTestData(variables)
 }
 
@@ -515,161 +505,52 @@ function generateTranscriptTestData(variables) {
   ElMessage.success(`Generated 10 test records (1 record per student, ranked by total score)`)
 }
 
-// ===== File Import/Export =====
-
-const SAMPLE_VALUES = {
-  STUDENT_ID: '2025001', STUDENT_NAME: 'Alice Johnson', STUDENT_EMAIL: 'alice@example.com',
-  CLASS_NAME: 'Computer Science Class 1', SEMESTER: 'Fall 2024',
-  CHINESE: 85, MATH: 90, ENGLISH: 88, TOTAL: 263, RANK: 1,
-  ISSUE_DATE: new Date().toISOString().split('T')[0]
-}
-
-function getSampleData(variables) {
-  const sample = {}
-  variables.forEach(v => { sample[v] = SAMPLE_VALUES[v] ?? `Sample ${v}` })
-  return sample
-}
-
-function handleImportClick(type) {
-  if (!selectedTemplate.value) {
-    ElMessage.warning('Please select a template first')
-    return
+// Generate payroll test data
+function generatePayrollTestData(variables) {
+  // Generate default email configuration
+  if (!form.email_config.subject) {
+    form.email_config.subject = 'Payslip for {{MONTH}}'
   }
-  importFileType.value = type
-  fileInputRef.value?.click()
-}
-
-function downloadTemplateFile(format) {
-  if (!selectedTemplate.value) {
-    ElMessage.warning('Please select a template first')
-    return
+  if (!form.email_config.body) {
+    form.email_config.body = 'Dear {{EMPLOYEE_NAME}},\n\nPlease check your payslip for {{MONTH}} attached.\n\nNet Salary: {{NET_SALARY}}\n\nBest regards,\nHR Department'
   }
 
-  const variables = selectedTemplate.value.variables || []
-  if (variables.length === 0) {
-    ElMessage.warning('This template has no defined variables')
-    return
-  }
+  const demoEmployees = [
+    { name: 'John Doe', email: 'john@example.com', dept: 'Engineering', pos: 'Engineer' },
+    { name: 'Jane Smith', email: 'jane@example.com', dept: 'Marketing', pos: 'Manager' },
+    { name: 'Bob Wilson', email: 'bob@example.com', dept: 'Sales', pos: 'Salesman' }
+  ]
+  
+  const currentMonth = new Date().toISOString().slice(0, 7) // YYYY-MM
 
-  const sampleData = getSampleData(variables)
-  const data = [variables, Object.values(sampleData)]
-  const fileName = `${selectedTemplate.value.name}_template`
-
-  if (format === 'excel') {
-    const ws = XLSX.utils.aoa_to_sheet(data)
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Sheet1')
-    ws['!cols'] = variables.map(() => ({ wch: 20 }))
-    XLSX.writeFile(wb, `${fileName}.xlsx`)
-  } else {
-    const csvContent = data.map(row =>
-      row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')
-    ).join('\n')
-    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' })
-    const link = Object.assign(document.createElement('a'), {
-      href: URL.createObjectURL(blob), download: `${fileName}.csv`, style: 'display:none'
+  demoEmployees.forEach((emp, i) => {
+    const record = {}
+    const income = 5000 + (i * 1000)
+    const deduction = income * 0.15
+    
+    variables.forEach(variable => {
+      switch(variable) {
+        case 'EMPLOYEE_ID': record[variable] = `EMP${1000+i}`; break;
+        case 'EMPLOYEE_NAME': record[variable] = emp.name; break;
+        case 'EMPLOYEE_EMAIL': record[variable] = emp.email; break;
+        case 'DEPARTMENT': record[variable] = emp.dept; break;
+        case 'POSITION': record[variable] = emp.pos; break;
+        case 'MONTH': record[variable] = currentMonth; break;
+        case 'TOTAL_INCOME': record[variable] = income; break;
+        case 'TOTAL_DEDUCTION': record[variable] = deduction; break;
+        case 'NET_SALARY': record[variable] = income - deduction; break;
+        case 'ISSUE_DATE': record[variable] = new Date().toISOString().split('T')[0]; break;
+        default: record[variable] = `Test ${variable}`;
+      }
     })
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-  }
-  ElMessage.success(`${format === 'excel' ? 'Excel' : 'CSV'} template downloaded`)
-}
-
-function mapRowToRecord(row, variables) {
-  const record = {}
-  variables.forEach(v => {
-    const val = row[v]
-    record[v] = val !== undefined && val !== null ? String(val).trim() : ''
+    form.records.push(record)
   })
-  return record
-}
-
-function processImportedRecords(records) {
-  const valid = records.filter(r => Object.values(r).some(v => v !== ''))
-  if (valid.length === 0) {
-    ElMessage.error('No valid data found in file')
-    return
+  
+  if (!form.email_config.recipients && demoEmployees.length > 0) {
+    form.email_config.recipients = demoEmployees.map(e => e.email).join(';')
   }
-
-  form.records.push(...valid)
-
-  if (isPersonalizedTemplate.value) {
-    const emails = valid.map(r => r['STUDENT_EMAIL']).filter(e => e?.trim())
-    if (emails.length > 0 && !form.email_config.recipients) {
-      form.email_config.recipients = emails.join(';')
-    }
-  }
-
-  ElMessage.success(`Successfully imported ${valid.length} records`)
-  if (fileInputRef.value) fileInputRef.value.value = ''
-}
-
-function warnMissingFields(headers, variables) {
-  const missing = variables.filter(v => !headers.includes(v))
-  if (missing.length > 0) {
-    ElMessage.warning(`File is missing fields: ${missing.join(', ')}`)
-  }
-}
-
-function handleFileImport(event) {
-  const file = event.target.files?.[0]
-  if (!file) return
-
-  const variables = selectedTemplate.value?.variables || []
-  const ext = file.name.split('.').pop().toLowerCase()
-
-  if (importFileType.value === 'csv') {
-    if (ext !== 'csv') { ElMessage.error('Please select a CSV file (.csv)'); return }
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      try {
-        let text = e.target.result
-        if (text.charCodeAt(0) === 0xFEFF) text = text.substring(1)
-        Papa.parse(text, {
-          header: true, skipEmptyLines: true,
-          transformHeader: h => h.trim(),
-          transform: v => v ? v.toString().trim() : '',
-          complete: (results) => {
-            if (!results.data?.length) { ElMessage.error('No valid data found'); return }
-            warnMissingFields(results.meta.fields || [], variables)
-            processImportedRecords(results.data.map(row => mapRowToRecord(row, variables)))
-          },
-          error: () => ElMessage.error('Failed to parse CSV file')
-        })
-      } catch (err) {
-        ElMessage.error('Failed to process CSV: ' + err.message)
-      }
-    }
-    reader.onerror = () => ElMessage.error('Failed to read file')
-    reader.readAsText(file, 'UTF-8')
-  } else {
-    if (!['xlsx', 'xls'].includes(ext)) { ElMessage.error('Please select an Excel file (.xlsx or .xls)'); return }
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      try {
-        const workbook = XLSX.read(new Uint8Array(e.target.result), { type: 'array' })
-        const sheet = workbook.Sheets[workbook.SheetNames[0]]
-        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false })
-        if (rows.length < 2) { ElMessage.error('File must have a header row and at least one data row'); return }
-        const headers = rows[0].map(h => String(h || '').trim()).filter(Boolean)
-        warnMissingFields(headers, variables)
-        const records = rows.slice(1)
-          .filter(row => row?.some(cell => cell && String(cell).trim()))
-          .map(row => {
-            const record = {}
-            headers.forEach((h, i) => { if (variables.includes(h)) record[h] = String(row[i] ?? '').trim() })
-            variables.forEach(v => { if (!(v in record)) record[v] = '' })
-            return record
-          })
-        processImportedRecords(records)
-      } catch (err) {
-        ElMessage.error('Import failed: ' + (err.message || 'Invalid file format'))
-      }
-    }
-    reader.onerror = () => ElMessage.error('Failed to read file')
-    reader.readAsArrayBuffer(file)
-  }
+  
+  ElMessage.success(`Generated ${demoEmployees.length} payroll test records`)
 }
 
 async function handleSave() {
@@ -764,13 +645,6 @@ function goBack() {
   justify-content: space-between;
   align-items: center;
   gap: 10px;
-  flex-wrap: wrap;
-}
-
-.toolbar-left {
-  display: flex;
-  gap: 10px;
-  align-items: center;
   flex-wrap: wrap;
 }
 
