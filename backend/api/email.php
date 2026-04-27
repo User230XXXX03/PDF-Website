@@ -49,17 +49,23 @@ switch ($action) {
 function sendBatchEmails($userId, $batchId) {
     $db = getDB();
     
-    // Get batch and template metadata
     $stmt = $db->prepare("
         SELECT b.*, t.name as template_name, t.set_type as template_type
         FROM batches b
         JOIN templates t ON b.template_id = t.id
-        WHERE b.id = ? AND b.user_id = ?
+        WHERE b.id = ?
     ");
-    $stmt->execute([$batchId, $userId]);
+    $stmt->execute([$batchId]);
     $batch = $stmt->fetch();
     
     if (!$batch) {
+        sendError('Batch not found', 404);
+    }
+
+    if ((int)$batch['user_id'] !== (int)$userId) {
+        if (isAdminUser($userId)) {
+            sendError('Permission denied', 403);
+        }
         sendError('Batch not found', 404);
     }
     
@@ -149,18 +155,24 @@ function sendBatchEmails($userId, $batchId) {
 function sendRecordEmail($userId, $recordId) {
     $db = getDB();
     
-    // Get record with batch info (including template type)
     $stmt = $db->prepare("
         SELECT br.*, b.*, t.name as template_name, t.set_type as template_type
         FROM batch_records br
         JOIN batches b ON br.batch_id = b.id
         JOIN templates t ON b.template_id = t.id
-        WHERE br.id = ? AND b.user_id = ?
+        WHERE br.id = ?
     ");
-    $stmt->execute([$recordId, $userId]);
+    $stmt->execute([$recordId]);
     $record = $stmt->fetch();
     
     if (!$record) {
+        sendError('Record not found', 404);
+    }
+
+    if ((int)$record['user_id'] !== (int)$userId) {
+        if (isAdminUser($userId)) {
+            sendError('Permission denied', 403);
+        }
         sendError('Record not found', 404);
     }
     

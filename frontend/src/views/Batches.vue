@@ -26,6 +26,7 @@
 
       <el-table :data="batches" v-loading="loading" style="margin-top: 20px">
         <el-table-column prop="name" label="Batch Name" min-width="200" />
+        <el-table-column v-if="isAdmin" prop="owner" label="Owner" width="120" />
         <el-table-column prop="template_name" label="Template" min-width="150" />
         <el-table-column prop="set_type" label="Type" width="150">
           <template #default="{ row }">
@@ -49,10 +50,10 @@
             <el-button type="primary" size="small" @click="viewDetail(row.id)">
               Detail
             </el-button>
-            <el-button size="small" @click="editBatch(row.id)">
+            <el-button v-if="canOperateBatch(row)" size="small" @click="editBatch(row.id)">
               Edit
             </el-button>
-            <el-button type="danger" size="small" @click="handleDelete(row)">
+            <el-button v-if="canOperateBatch(row)" type="danger" size="small" @click="handleDelete(row)">
               Delete
             </el-button>
           </template>
@@ -63,7 +64,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getBatches, deleteBatch } from '../api/batch'
@@ -72,6 +73,14 @@ const router = useRouter()
 const loading = ref(false)
 const batches = ref([])
 const filterStatus = ref('')
+const currentUser = computed(() => {
+  try {
+    return JSON.parse(sessionStorage.getItem('user') || '{}')
+  } catch (error) {
+    return {}
+  }
+})
+const isAdmin = computed(() => currentUser.value.username === 'admin')
 
 onMounted(() => {
   loadBatches()
@@ -106,7 +115,17 @@ function viewDetail(id) {
   router.push(`/batches/detail/${id}`)
 }
 
+function canOperateBatch(row) {
+  if (!row.user_id || !currentUser.value.id) return false
+  return String(row.user_id) === String(currentUser.value.id)
+}
+
 async function handleDelete(row) {
+  if (!canOperateBatch(row)) {
+    ElMessage.error('Permission denied')
+    return
+  }
+
   try {
     await ElMessageBox.confirm(
       'Are you sure you want to delete batch "' + row.name + '"?',

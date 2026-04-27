@@ -5,6 +5,7 @@
       <div>
         <el-button @click="goBack">Back</el-button>
         <el-button
+          v-if="canOperateBatch"
           type="success"
           @click="handleGenerateAll"
           :loading="generating"
@@ -14,6 +15,7 @@
           Generate All PDFs
         </el-button>
         <el-button
+          v-if="canOperateBatch"
           type="primary"
           @click="handleSendAll"
           :loading="sending"
@@ -50,7 +52,7 @@
       
       <!-- Email validation warning -->
       <el-alert
-        v-if="batch.records && batch.records.length > 0 && !allRecordsHaveEmail"
+        v-if="canOperateBatch && batch.records && batch.records.length > 0 && !allRecordsHaveEmail"
         type="warning"
         :closable="false"
         style="margin-bottom: 15px;"
@@ -108,6 +110,7 @@
         <el-table-column label="Actions" width="240" fixed="right">
           <template #default="{ row }">
             <el-button
+              v-if="canOperateBatch"
               size="small"
               @click="handleGenerateOne(row)"
               :disabled="processing[row.id]"
@@ -131,7 +134,7 @@
               Download
             </el-button>
             <el-button
-              v-if="row.pdf_generated && getPersonEmail(row)"
+              v-if="canOperateBatch && row.pdf_generated && getPersonEmail(row)"
               type="warning"
               size="small"
               @click="handleSendOne(row)"
@@ -165,6 +168,19 @@ const batch = ref({
   records: []
 })
 
+const currentUser = computed(() => {
+  try {
+    return JSON.parse(sessionStorage.getItem('user') || '{}')
+  } catch (error) {
+    return {}
+  }
+})
+
+const canOperateBatch = computed(() => {
+  if (!batch.value.user_id || !currentUser.value.id) return false
+  return String(batch.value.user_id) === String(currentUser.value.id)
+})
+
 const windowWidth = ref(window.innerWidth)
 
 function handleResize() {
@@ -186,7 +202,7 @@ const responsiveDescColumn = computed(() => {
 })
 
 const canGenerate = computed(() => {
-  return batch.value.total_count > 0 && !generating.value
+  return canOperateBatch.value && batch.value.total_count > 0 && !generating.value
 })
 
 // Return column name based on template type
@@ -283,7 +299,7 @@ function getPersonEmail(record) {
 
 const canSendEmail = computed(() => {
   // Must have generated PDFs
-  if (batch.value.generated_count === 0 || sending.value) {
+  if (!canOperateBatch.value || batch.value.generated_count === 0 || sending.value) {
     return false
   }
   

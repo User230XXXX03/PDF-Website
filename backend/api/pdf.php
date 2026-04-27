@@ -33,17 +33,23 @@ if ($method === 'POST') {
 function generateBatchPDFs($userId, $batchId) {
     $db = getDB();
     
-    // Get batch with template
     $stmt = $db->prepare("
         SELECT b.*, t.content, t.name as template_name
         FROM batches b
         JOIN templates t ON b.template_id = t.id
-        WHERE b.id = ? AND b.user_id = ?
+        WHERE b.id = ?
     ");
-    $stmt->execute([$batchId, $userId]);
+    $stmt->execute([$batchId]);
     $batch = $stmt->fetch();
     
     if (!$batch) {
+        sendError('Batch not found', 404);
+    }
+
+    if ((int)$batch['user_id'] !== (int)$userId) {
+        if (isAdminUser($userId)) {
+            sendError('Permission denied', 403);
+        }
         sendError('Batch not found', 404);
     }
     
@@ -124,18 +130,24 @@ function generateBatchPDFs($userId, $batchId) {
 function generateRecordPDF($userId, $recordId) {
     $db = getDB();
     
-    // Get record with batch and template
     $stmt = $db->prepare("
         SELECT br.*, b.user_id, t.content
         FROM batch_records br
         JOIN batches b ON br.batch_id = b.id
         JOIN templates t ON b.template_id = t.id
-        WHERE br.id = ? AND b.user_id = ?
+        WHERE br.id = ?
     ");
-    $stmt->execute([$recordId, $userId]);
+    $stmt->execute([$recordId]);
     $record = $stmt->fetch();
     
     if (!$record) {
+        sendError('Record not found', 404);
+    }
+
+    if ((int)$record['user_id'] !== (int)$userId) {
+        if (isAdminUser($userId)) {
+            sendError('Permission denied', 403);
+        }
         sendError('Record not found', 404);
     }
     
@@ -245,18 +257,26 @@ function getRecipientInfo($record) {
 
 function getPDFRecord($userId, $recordId, $includeStudentName = false) {
     $db = getDB();
-    $selectFields = $includeStudentName ? 'br.pdf_path, br.student_name' : 'br.pdf_path';
+    $selectFields = $includeStudentName ? 'br.pdf_path, br.student_name, b.user_id' : 'br.pdf_path, b.user_id';
     
     $stmt = $db->prepare("
         SELECT {$selectFields}
         FROM batch_records br
         JOIN batches b ON br.batch_id = b.id
-        WHERE br.id = ? AND b.user_id = ?
+        WHERE br.id = ?
     ");
-    $stmt->execute([$recordId, $userId]);
+    $stmt->execute([$recordId]);
     $record = $stmt->fetch();
     
-    if (!$record || !$record['pdf_path']) {
+    if (!$record) {
+        sendError('PDF not found', 404);
+    }
+
+    if ((int)$record['user_id'] !== (int)$userId && !isAdminUser($userId)) {
+        sendError('PDF not found', 404);
+    }
+    
+    if (!$record['pdf_path']) {
         sendError('PDF not found', 404);
     }
     
