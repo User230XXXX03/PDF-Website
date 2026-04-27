@@ -43,41 +43,65 @@ switch ($method) {
 
 function getBatches($userId) {
     $db = getDB();
-    
+
+    $isAdmin = isAdminUser($userId);
+
     $status = $_GET['status'] ?? '';
-    
-    $sql = "
-        SELECT b.*, t.name as template_name, t.set_type
-        FROM batches b
-        JOIN templates t ON b.template_id = t.id
-        WHERE b.user_id = ?
-    ";
-    $params = [$userId];
-    
+
+    if ($isAdmin) {
+        $sql = "
+            SELECT b.*, t.name as template_name, t.set_type, u.username as owner
+            FROM batches b
+            JOIN templates t ON b.template_id = t.id
+            JOIN users u ON b.user_id = u.id
+        ";
+        $params = [];
+    } else {
+        $sql = "
+            SELECT b.*, t.name as template_name, t.set_type
+            FROM batches b
+            JOIN templates t ON b.template_id = t.id
+            WHERE b.user_id = ?
+        ";
+        $params = [$userId];
+    }
+
     if ($status) {
-        $sql .= " AND b.status = ?";
+        $sql .= ($isAdmin ? " WHERE" : " AND") . " b.status = ?";
         $params[] = $status;
     }
-    
+
     $sql .= " ORDER BY b.created_at DESC";
-    
+
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
     $batches = $stmt->fetchAll();
-    
+
     sendSuccess($batches);
 }
 
 function getBatch($userId, $id) {
     $db = getDB();
-    
-    $stmt = $db->prepare("
-        SELECT b.*, t.name as template_name, t.set_type, t.variables
-        FROM batches b
-        JOIN templates t ON b.template_id = t.id
-        WHERE b.id = ? AND b.user_id = ?
-    ");
-    $stmt->execute([$id, $userId]);
+
+    $isAdmin = isAdminUser($userId);
+
+    if ($isAdmin) {
+        $stmt = $db->prepare("
+            SELECT b.*, t.name as template_name, t.set_type, t.variables
+            FROM batches b
+            JOIN templates t ON b.template_id = t.id
+            WHERE b.id = ?
+        ");
+        $stmt->execute([$id]);
+    } else {
+        $stmt = $db->prepare("
+            SELECT b.*, t.name as template_name, t.set_type, t.variables
+            FROM batches b
+            JOIN templates t ON b.template_id = t.id
+            WHERE b.id = ? AND b.user_id = ?
+        ");
+        $stmt->execute([$id, $userId]);
+    }
     $batch = $stmt->fetch();
     
     if (!$batch) {
@@ -114,48 +138,28 @@ function createBatch($userId) {
     $name = sanitizeInput($data['name']);
     $templateId = (int)$data['template_id'];
     $records = $data['records'] ?? [];
-    $emailRecipients = $data['email_recipients'] ?? null;
     $emailSubject = $data['email_subject'] ?? null;
     $emailBody = $data['email_body'] ?? null;
     
     $db = getDB();
     
-    // Verify template exists and belongs to user
-    $stmt = $db->prepare("SELECT id FROM templates WHERE id = ? AND user_id = ?");
-    $stmt->execute([$templateId, $userId]);
+    // Verify template exists. BatchEditor shows all templates, so any visible template can be used to create a batch.
+    $stmt = $db->prepare("SELECT id FROM templates WHERE id = ?");
+    $stmt->execute([$templateId]);
     if (!$stmt->fetch()) {
         sendError('Template not found', 404);
     }
     
     // Create batch
     $stmt = $db->prepare("
-        INSERT INTO batches (user_id, template_id, name, total_count, email_recipients, email_subject, email_body) 
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO batches (user_id, template_id, name, total_count, email_subject, email_body) 
+        VALUES (?, ?, ?, ?, ?, ?)
     ");
-    $stmt->execute([$userId, $templateId, $name, count($records), $emailRecipients, $emailSubject, $emailBody]);
+    $stmt->execute([$userId, $templateId, $name, count($records), $emailSubject, $emailBody]);
     
     $batchId = $db->lastInsertId();
     
-    // Insert records
-    if (!empty($records)) {
-        $stmt = $db->prepare("
-            INSERT INTO batch_records (batch_id, student_name, student_email, data) 
-            VALUES (?, ?, ?, ?)
-        ");
-        
-        foreach ($records as $record) {
-            $studentName = $record['student_name'] ?? '';
-            $studentEmail = $record['student_email'] ?? '';
-            $recordData = $record;
-            
-            $stmt->execute([
-                $batchId,
-                $studentName,
-                $studentEmail,
-                json_encode($recordData)
-            ]);
-        }
-    }
+    insertBatchRecords($db, $batchId, $records);
     
     logActivity($userId, $batchId, 'generation', "Batch created: $name", [
         'batch_id' => $batchId,
@@ -165,17 +169,49 @@ function createBatch($userId) {
     sendSuccess(['id' => $batchId], 'Batch created successfully');
 }
 
+function insertBatchRecords($db, $batchId, $records) {
+    if (empty($records)) {
+        return;
+    }
+    
+    $stmt = $db->prepare("
+        INSERT INTO batch_records (batch_id, student_name, student_email, data) 
+        VALUES (?, ?, ?, ?)
+    ");
+    
+    foreach ($records as $record) {
+        $studentName = $record['student_name'] ?? '';
+        $studentEmail = $record['student_email'] ?? '';
+        
+        $stmt->execute([
+            $batchId,
+            $studentName,
+            $studentEmail,
+            json_encode($record)
+        ]);
+    }
+}
+
 function updateBatch($userId, $id) {
     $data = json_decode(file_get_contents('php://input'), true);
-    
+
     $db = getDB();
-    
-    // Check ownership
-    $stmt = $db->prepare("SELECT * FROM batches WHERE id = ? AND user_id = ?");
-    $stmt->execute([$id, $userId]);
+
+    $isAdmin = isAdminUser($userId);
+
+    // Admin can view other users' batches in detail.
+    $stmt = $db->prepare("SELECT * FROM batches WHERE id = ?");
+    $stmt->execute([$id]);
     $batch = $stmt->fetch();
     
     if (!$batch) {
+        sendError('Batch not found', 404);
+    }
+
+    if ((int)$batch['user_id'] !== (int)$userId) {
+        if ($isAdmin) {
+            sendError('Permission denied', 403);
+        }
         sendError('Batch not found', 404);
     }
     
@@ -183,8 +219,7 @@ function updateBatch($userId, $id) {
     $status = sanitizeInput($data['status'] ?? $batch['status']);
     $records = $data['records'] ?? null;
     
-    // Email configuration fields (nullable)
-    $emailRecipients = isset($data['email_recipients']) ? $data['email_recipients'] : $batch['email_recipients'];
+    // Email message fields are batch-level; recipients are stored per record.
     $emailSubject = isset($data['email_subject']) ? $data['email_subject'] : $batch['email_subject'];
     $emailBody = isset($data['email_body']) ? $data['email_body'] : $batch['email_body'];
     
@@ -194,13 +229,13 @@ function updateBatch($userId, $id) {
         sendError('Invalid status');
     }
     
-    // Update batch
+    // Update batch.
     $stmt = $db->prepare("
         UPDATE batches 
-        SET name = ?, status = ?, email_recipients = ?, email_subject = ?, email_body = ? 
+        SET name = ?, status = ?, email_subject = ?, email_body = ? 
         WHERE id = ? AND user_id = ?
     ");
-    $stmt->execute([$name, $status, $emailRecipients, $emailSubject, $emailBody, $id, $userId]);
+    $stmt->execute([$name, $status, $emailSubject, $emailBody, $id, $userId]);
     
     // Update records if provided
     if ($records !== null) {
@@ -208,26 +243,7 @@ function updateBatch($userId, $id) {
         $stmt = $db->prepare("DELETE FROM batch_records WHERE batch_id = ?");
         $stmt->execute([$id]);
         
-        // Insert new records
-        if (!empty($records)) {
-            $stmt = $db->prepare("
-                INSERT INTO batch_records (batch_id, student_name, student_email, data) 
-                VALUES (?, ?, ?, ?)
-            ");
-            
-            foreach ($records as $record) {
-                $studentName = $record['student_name'] ?? '';
-                $studentEmail = $record['student_email'] ?? '';
-                $recordData = $record;
-                
-                $stmt->execute([
-                    $id,
-                    $studentName,
-                    $studentEmail,
-                    json_encode($recordData)
-                ]);
-            }
-        }
+        insertBatchRecords($db, $id, $records);
         
         // Update total count
         $stmt = $db->prepare("UPDATE batches SET total_count = ? WHERE id = ?");
@@ -241,17 +257,26 @@ function updateBatch($userId, $id) {
 
 function deleteBatch($userId, $id) {
     $db = getDB();
-    
-    // Check ownership
-    $stmt = $db->prepare("SELECT name FROM batches WHERE id = ? AND user_id = ?");
-    $stmt->execute([$id, $userId]);
+
+    $isAdmin = isAdminUser($userId);
+
+    // Admin can view other users' batches in detail.
+    $stmt = $db->prepare("SELECT name, user_id FROM batches WHERE id = ?");
+    $stmt->execute([$id]);
     $batch = $stmt->fetch();
     
     if (!$batch) {
         sendError('Batch not found', 404);
     }
+
+    if ((int)$batch['user_id'] !== (int)$userId) {
+        if ($isAdmin) {
+            sendError('Permission denied', 403);
+        }
+        sendError('Batch not found', 404);
+    }
     
-    // Delete batch (cascade will delete records)
+    // Delete batch.
     $stmt = $db->prepare("DELETE FROM batches WHERE id = ? AND user_id = ?");
     $stmt->execute([$id, $userId]);
     

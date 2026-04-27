@@ -68,10 +68,6 @@ const routes = [
         component: () => import('../views/Settings.vue')
       }
     ]
-  },
-  {
-    path: '/:pathMatch(.*)*',
-    redirect: '/dashboard'
   }
 ]
 
@@ -82,11 +78,11 @@ const router = createRouter({
 
 // Auth guard
 router.beforeEach((to, from, next) => {
-  const storedUser = sessionStorage.getItem('user')
+  const token = sessionStorage.getItem('user')
   
   if (to.path === '/login' || to.path === '/register') {
     next()
-  } else if (!storedUser) {
+  } else if (!token) {
     next('/login')
   } else {
     next()

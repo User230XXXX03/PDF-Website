@@ -21,6 +21,7 @@
             <el-option label="Course Feedback" value="Course Feedback" />
             <el-option label="Certificate" value="Certificate" />
             <el-option label="Transcript" value="Transcript" />
+            <el-option label="Payroll" value="Payroll" />
           </el-select>
         </el-form-item>
 

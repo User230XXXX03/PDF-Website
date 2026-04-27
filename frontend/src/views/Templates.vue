@@ -3,10 +3,10 @@
     <div class="page-header">
       <h1 class="page-title">Templates</h1>
       <div>
-        <!--<el-button type="success" @click="showImportDialog">
+        <el-button type="success" @click="showImportDialog">
           <el-icon><Upload /></el-icon>
           Import Template
-        </el-button>-->
+        </el-button>
         <el-button type="primary" @click="createTemplate">
           <el-icon><Plus /></el-icon>
           Create Template
@@ -36,7 +36,7 @@
           style="margin-top: 10px;"
         >
           <el-icon><Download /></el-icon>
-          Download Payroll Test Template
+          Download Transcript Test Template
         </el-button>
       </el-alert>
       
@@ -201,34 +201,43 @@ function showImportDialog() {
 
 // Download test template
 function downloadTestTemplate() {
-  // Payroll test template HTML
+  // Transcript test template HTML
   const templateHTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Payroll Statement</title>
+    <title>Student Transcript</title>
     <style>
         body {
             font-family: Arial, sans-serif;
             margin: 30px;
             font-size: 14px;
+            color: #222;
         }
         .header {
             text-align: center;
-            margin-bottom: 30px;
+            margin-bottom: 28px;
         }
         .header h1 {
-            margin: 0 0 10px 0;
+            margin: 0 0 8px 0;
             font-size: 24px;
             font-weight: bold;
+            letter-spacing: 0;
         }
-        .info-table {
+        .subtitle {
+            font-size: 13px;
+            color: #666;
+        }
+        .info-table,
+        .score-table {
             width: 100%;
             border-collapse: collapse;
             margin-bottom: 20px;
             border: 1px solid #000;
         }
-        .info-table td {
+        .info-table td,
+        .score-table th,
+        .score-table td {
             padding: 8px 12px;
             border: 1px solid #000;
         }
@@ -237,37 +246,20 @@ function downloadTestTemplate() {
             font-weight: bold;
             width: 20%;
         }
-        .salary-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 20px;
-            border: 1px solid #000;
-        }
-        .salary-table th {
+        .score-table th {
             background-color: #e0e0e0;
-            padding: 10px;
-            border: 1px solid #000;
             font-weight: bold;
             text-align: center;
         }
-        .salary-table td {
-            padding: 8px 12px;
-            border: 1px solid #000;
+        .score-table .score {
+            text-align: center;
         }
-        .salary-table .amount {
-            text-align: right;
-        }
-        .salary-table .total-row {
+        .score-table .total-row {
             background-color: #f5f5f5;
             font-weight: bold;
         }
-        .salary-table .final-row {
-            background-color: #e8f4f8;
-            font-weight: bold;
-            font-size: 15px;
-        }
         .footer {
-            margin-top: 20px;
+            margin-top: 22px;
             text-align: center;
             font-size: 12px;
             color: #666;
@@ -276,109 +268,64 @@ function downloadTestTemplate() {
 </head>
 <body>
     <div class="header">
-        <h1>PAYROLL STATEMENT</h1>
+        <h1>STUDENT TRANSCRIPT</h1>
+        <div class="subtitle">Official Academic Record</div>
     </div>
 
-    <!-- Basic Information -->
     <table class="info-table">
         <tr>
-            <td class="label">Employee ID</td>
-            <td>{{EMPLOYEE_ID}}</td>
-            <td class="label">Employee Name</td>
-            <td>{{EMPLOYEE_NAME}}</td>
-        </tr>
-        <tr>
-            <td class="label">Department</td>
-            <td>{{DEPARTMENT}}</td>
-            <td class="label">Position</td>
-            <td>{{POSITION}}</td>
+            <td class="label">Student ID</td>
+            <td>{{STUDENT_ID}}</td>
+            <td class="label">Student Name</td>
+            <td>{{STUDENT_NAME}}</td>
         </tr>
         <tr>
             <td class="label">Email</td>
-            <td>{{EMPLOYEE_EMAIL}}</td>
-            <td class="label">Pay Period</td>
-            <td>{{MONTH}}</td>
+            <td>{{STUDENT_EMAIL}}</td>
+            <td class="label">Class</td>
+            <td>{{CLASS_NAME}}</td>
         </tr>
         <tr>
+            <td class="label">Semester</td>
+            <td>{{SEMESTER}}</td>
             <td class="label">Issue Date</td>
-            <td colspan="3">{{ISSUE_DATE}}</td>
+            <td>{{ISSUE_DATE}}</td>
         </tr>
     </table>
 
-    <!-- Earnings Details -->
-    <table class="salary-table">
+    <table class="score-table">
         <thead>
             <tr>
-                <th colspan="2">Earnings</th>
+                <th>Subject</th>
+                <th>Score</th>
             </tr>
         </thead>
         <tbody>
             <tr>
-                <td>Base Salary</td>
-                <td class="amount">{{BASE_SALARY}}</td>
+                <td>Chinese</td>
+                <td class="score">{{CHINESE}}</td>
             </tr>
             <tr>
-                <td>Performance Bonus</td>
-                <td class="amount">{{PERFORMANCE_BONUS}}</td>
+                <td>Mathematics</td>
+                <td class="score">{{MATH}}</td>
             </tr>
             <tr>
-                <td>Attendance Bonus</td>
-                <td class="amount">{{ATTENDANCE_BONUS}}</td>
-            </tr>
-            <tr>
-                <td>Overtime Pay</td>
-                <td class="amount">{{OVERTIME_PAY}}</td>
-            </tr>
-            <tr>
-                <td>Allowances</td>
-                <td class="amount">{{SUBSIDY}}</td>
+                <td>English</td>
+                <td class="score">{{ENGLISH}}</td>
             </tr>
             <tr class="total-row">
-                <td>Gross Pay</td>
-                <td class="amount">{{TOTAL_INCOME}}</td>
-            </tr>
-        </tbody>
-    </table>
-
-    <!-- Deductions Details -->
-    <table class="salary-table">
-        <thead>
-            <tr>
-                <th colspan="2">Deductions</th>
-            </tr>
-        </thead>
-        <tbody>
-            <tr>
-                <td>Social Insurance</td>
-                <td class="amount">{{SOCIAL_INSURANCE}}</td>
-            </tr>
-            <tr>
-                <td>Income Tax</td>
-                <td class="amount">{{TAX}}</td>
-            </tr>
-            <tr>
-                <td>Other Deductions</td>
-                <td class="amount">{{OTHER_DEDUCTION}}</td>
+                <td>Total</td>
+                <td class="score">{{TOTAL}}</td>
             </tr>
             <tr class="total-row">
-                <td>Total Deductions</td>
-                <td class="amount">{{TOTAL_DEDUCTION}}</td>
-            </tr>
-        </tbody>
-    </table>
-
-    <!-- Net Pay -->
-    <table class="salary-table">
-        <tbody>
-            <tr class="final-row">
-                <td>Net Pay</td>
-                <td class="amount">{{NET_SALARY}}</td>
+                <td>Class Rank</td>
+                <td class="score">{{RANK}}</td>
             </tr>
         </tbody>
     </table>
 
     <div class="footer">
-        This payroll statement is automatically generated | Issue Date: {{ISSUE_DATE}}
+        This transcript is automatically generated | Issue Date: {{ISSUE_DATE}}
     </div>
 </body>
 </html>`
@@ -390,7 +337,7 @@ function downloadTestTemplate() {
   const url = window.URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = 'payroll_template_test.html'
+  link.download = 'transcript_template_test.html'
   
   // Trigger download
   document.body.appendChild(link)
@@ -402,7 +349,6 @@ function downloadTestTemplate() {
   
   ElMessage.success('Success')
 }
-
 // Handle file selection
 function handleFileChange(file) {
   uploadedFile.value = file

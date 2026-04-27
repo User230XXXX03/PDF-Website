@@ -1,9 +1,4 @@
 <?php
-// Clear opcache (if enabled)
-if (function_exists('opcache_reset')) {
-    opcache_reset();
-}
-
 require_once __DIR__ . '/../includes/config.php';
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/auth_middleware.php';
@@ -76,22 +71,7 @@ function generateBatchPDFs($userId, $batchId) {
             ");
             $stmt->execute([$pdfPath, $record['id']]);
             
-            // Extract recipient info from record data for logging
-            $recordData = json_decode($record['data'], true);
-            $recipientName = null;
-            $recipientEmail = null;
-            
-            // Try to get name and email based on template type
-            if (isset($recordData['STUDENT_NAME'])) {
-                $recipientName = $recordData['STUDENT_NAME'];
-                $recipientEmail = $recordData['STUDENT_EMAIL'] ?? null;
-            } elseif (isset($recordData['EMPLOYEE_NAME'])) {
-                $recipientName = $recordData['EMPLOYEE_NAME'];
-                $recipientEmail = $recordData['EMPLOYEE_EMAIL'] ?? null;
-            } elseif (isset($recordData['USER_NAME'])) {
-                $recipientName = $recordData['USER_NAME'];
-                $recipientEmail = $recordData['USER_EMAIL'] ?? null;
-            }
+            [$recipientName, $recipientEmail] = getRecipientInfo($record);
             
             // Log successful PDF generation with details
             logActivity(
@@ -109,10 +89,7 @@ function generateBatchPDFs($userId, $batchId) {
         } catch (Exception $e) {
             $failCount++;
             
-            // Extract recipient info for error logging
-            $recordData = json_decode($record['data'], true);
-            $recipientName = $recordData['STUDENT_NAME'] ?? $recordData['EMPLOYEE_NAME'] ?? $recordData['USER_NAME'] ?? null;
-            $recipientEmail = $recordData['STUDENT_EMAIL'] ?? $recordData['EMPLOYEE_EMAIL'] ?? $recordData['USER_EMAIL'] ?? null;
+            [$recipientName, $recipientEmail] = getRecipientInfo($record);
             
             logActivity(
                 $userId, 
@@ -127,13 +104,14 @@ function generateBatchPDFs($userId, $batchId) {
         }
     }
     
-    // Update batch
+    $finalStatus = $failCount > 0 ? 'failed' : 'completed';
+    
     $stmt = $db->prepare("
         UPDATE batches 
-        SET status = 'completed', generated_count = ? 
+        SET status = ?, generated_count = ? 
         WHERE id = ?
     ");
-    $stmt->execute([$successCount, $batchId]);
+    $stmt->execute([$finalStatus, $successCount, $batchId]);
     
     // No longer logging batch summary, as each record has detailed logs
     
@@ -172,10 +150,7 @@ function generateRecordPDF($userId, $recordId) {
         ");
         $stmt->execute([$pdfPath, $recordId]);
         
-        // Extract recipient info from record data for logging
-        $recordData = json_decode($record['data'], true);
-        $recipientName = $recordData['STUDENT_NAME'] ?? $recordData['EMPLOYEE_NAME'] ?? $recordData['USER_NAME'] ?? null;
-        $recipientEmail = $recordData['STUDENT_EMAIL'] ?? $recordData['EMPLOYEE_EMAIL'] ?? $recordData['USER_EMAIL'] ?? null;
+        [$recipientName, $recipientEmail] = getRecipientInfo($record);
         
         logActivity(
             $userId, 
@@ -190,10 +165,7 @@ function generateRecordPDF($userId, $recordId) {
         
         sendSuccess(['pdf_path' => $pdfPath], 'PDF generated successfully');
     } catch (Exception $e) {
-        // Extract recipient info for error logging
-        $recordData = json_decode($record['data'], true);
-        $recipientName = $recordData['STUDENT_NAME'] ?? $recordData['EMPLOYEE_NAME'] ?? $recordData['USER_NAME'] ?? null;
-        $recipientEmail = $recordData['STUDENT_EMAIL'] ?? $recordData['EMPLOYEE_EMAIL'] ?? $recordData['USER_EMAIL'] ?? null;
+        [$recipientName, $recipientEmail] = getRecipientInfo($record);
         
         logActivity(
             $userId, 
@@ -262,12 +234,21 @@ function generatePDF($record, $templateContent) {
     return $filename;
 }
 
-function previewPDF($userId, $recordId) {
-    $db = getDB();
+function getRecipientInfo($record) {
+    $recordData = json_decode($record['data'], true);
     
-    // Get record with ownership check
+    return [
+        $recordData['STUDENT_NAME'] ?? $recordData['EMPLOYEE_NAME'] ?? $recordData['USER_FULL_NAME'] ?? $recordData['USER_NAME'] ?? $recordData['RECIPIENT_NAME'] ?? $recordData['NAME'] ?? null,
+        $recordData['STUDENT_EMAIL'] ?? $recordData['EMPLOYEE_EMAIL'] ?? $recordData['USER_EMAIL'] ?? $recordData['RECIPIENT_EMAIL'] ?? $recordData['EMAIL'] ?? null
+    ];
+}
+
+function getPDFRecord($userId, $recordId, $includeStudentName = false) {
+    $db = getDB();
+    $selectFields = $includeStudentName ? 'br.pdf_path, br.student_name' : 'br.pdf_path';
+    
     $stmt = $db->prepare("
-        SELECT br.pdf_path
+        SELECT {$selectFields}
         FROM batch_records br
         JOIN batches b ON br.batch_id = b.id
         WHERE br.id = ? AND b.user_id = ?
@@ -279,11 +260,18 @@ function previewPDF($userId, $recordId) {
         sendError('PDF not found', 404);
     }
     
-    $filepath = UPLOAD_DIR . $record['pdf_path'];
+    $record['filepath'] = UPLOAD_DIR . $record['pdf_path'];
     
-    if (!file_exists($filepath)) {
+    if (!file_exists($record['filepath'])) {
         sendError('PDF file not found', 404);
     }
+    
+    return $record;
+}
+
+function previewPDF($userId, $recordId) {
+    $record = getPDFRecord($userId, $recordId);
+    $filepath = $record['filepath'];
     
     header('Content-Type: application/pdf');
     header('Content-Disposition: inline; filename="' . basename($filepath) . '"');
@@ -293,27 +281,8 @@ function previewPDF($userId, $recordId) {
 }
 
 function downloadPDF($userId, $recordId) {
-    $db = getDB();
-    
-    // Get record with ownership check
-    $stmt = $db->prepare("
-        SELECT br.pdf_path, br.student_name
-        FROM batch_records br
-        JOIN batches b ON br.batch_id = b.id
-        WHERE br.id = ? AND b.user_id = ?
-    ");
-    $stmt->execute([$recordId, $userId]);
-    $record = $stmt->fetch();
-    
-    if (!$record || !$record['pdf_path']) {
-        sendError('PDF not found', 404);
-    }
-    
-    $filepath = UPLOAD_DIR . $record['pdf_path'];
-    
-    if (!file_exists($filepath)) {
-        sendError('PDF file not found', 404);
-    }
+    $record = getPDFRecord($userId, $recordId, true);
+    $filepath = $record['filepath'];
     
     $downloadName = ($record['student_name'] ? sanitizeInput($record['student_name']) . '_' : '') . 'document.pdf';
     

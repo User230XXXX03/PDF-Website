@@ -170,7 +170,6 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
 import { getDashboardStats } from '../api/dashboard'
 import { getCurrentUser } from '../api/auth'
 

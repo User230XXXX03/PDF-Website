@@ -39,6 +39,15 @@ function validateRequired($fields, $data) {
     }
 }
 
+function isAdminUser($userId) {
+    $db = getDB();
+    $stmt = $db->prepare("SELECT username FROM users WHERE id = ?");
+    $stmt->execute([$userId]);
+    $user = $stmt->fetch();
+    
+    return $user && $user['username'] === 'admin';
+}
+
 function logActivity($userId, $batchId, $type, $message, $details = [], $recordId = null, $recipientName = null, $recipientEmail = null) {
     try {
         $db = getDB();

@@ -9,7 +9,7 @@
 
       <el-form :model="form" :rules="rules" ref="formRef" label-width="180px">
         <el-form-item label="SMTP Host" prop="smtp_host">
-          <el-input v-model="form.smtp_host" placeholder="e.g. smtp.163.com" />
+          <el-input v-model="form.smtp_host" placeholder="e.g. smtp.gmail.com" />
         </el-form-item>
 
         <el-form-item label="SMTP Port" prop="smtp_port">

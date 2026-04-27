@@ -7,9 +7,7 @@ define('DB_NAME', 'pdf_generator');
 
 // Application Configuration
 define('APP_NAME', 'PDF Generator System');
-define('BASE_URL', 'http://localhost');
 define('UPLOAD_DIR', __DIR__ . '/../uploads/pdfs/');
-define('MAX_FILE_SIZE', 10 * 1024 * 1024); // 10MB
 
 // Session Configuration
 define('SESSION_LIFETIME', 3600 * 24); // 24 hours

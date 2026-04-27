@@ -16,11 +16,7 @@ if ($method === 'GET') {
 function getDashboardStats($userId) {
     $db = getDB();
     
-    // Check if current user is admin
-    $stmt = $db->prepare("SELECT username FROM users WHERE id = ?");
-    $stmt->execute([$userId]);
-    $user = $stmt->fetch();
-    $isAdmin = ($user && $user['username'] === 'admin');
+    $isAdmin = isAdminUser($userId);
     
     // Get total templates
     if ($isAdmin) {

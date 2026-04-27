@@ -32,9 +32,15 @@ function getLogs($userId) {
     // Calculate offset
     $offset = ($page - 1) * $pageSize;
     
-    // Build query
-    $whereClauses = ['user_id = ?'];
-    $params = [$userId];
+    $isAdmin = isAdminUser($userId);
+
+    $whereClauses = [];
+    $params = [];
+
+    if (!$isAdmin) {
+        $whereClauses[] = 'user_id = ?';
+        $params[] = $userId;
+    }
     
     if ($type) {
         $whereClauses[] = 'type = ?';
@@ -56,7 +62,7 @@ function getLogs($userId) {
         $params[] = $endDate;
     }
     
-    $whereClause = implode(' AND ', $whereClauses);
+    $whereClause = $whereClauses ? implode(' AND ', $whereClauses) : '1=1';
     
     // Export as CSV if requested
     if ($export === 'csv') {

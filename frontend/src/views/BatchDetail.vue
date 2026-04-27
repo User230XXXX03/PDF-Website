@@ -131,7 +131,7 @@
               Download
             </el-button>
             <el-button
-              v-if="row.pdf_generated && getStudentEmail(row)"
+              v-if="row.pdf_generated && getPersonEmail(row)"
               type="warning"
               size="small"
               @click="handleSendOne(row)"
@@ -281,15 +281,6 @@ function getPersonEmail(record) {
   return record.student_email || ''
 }
 
-// Keep old function names for backward compatibility
-function getStudentName(record) {
-  return getPersonName(record)
-}
-
-function getStudentEmail(record) {
-  return getPersonEmail(record)
-}
-
 const canSendEmail = computed(() => {
   // Must have generated PDFs
   if (batch.value.generated_count === 0 || sending.value) {
@@ -304,7 +295,7 @@ const canSendEmail = computed(() => {
   
   // All records must have email and PDF generated
   const allHaveValidEmail = records.every(record => {
-    const email = getStudentEmail(record)
+    const email = getPersonEmail(record)
     return email && email.trim() !== '' && record.pdf_generated
   })
   
@@ -317,7 +308,7 @@ const allRecordsHaveEmail = computed(() => {
   if (records.length === 0) return true
   
   return records.every(record => {
-    const email = getStudentEmail(record)
+    const email = getPersonEmail(record)
     return email && email.trim() !== ''
   })
 })
@@ -326,7 +317,7 @@ const allRecordsHaveEmail = computed(() => {
 const recordsWithoutEmail = computed(() => {
   const records = batch.value.records || []
   return records.filter(record => {
-    const email = getStudentEmail(record)
+    const email = getPersonEmail(record)
     return !email || email.trim() === ''
   })
 })

@@ -44,11 +44,7 @@ switch ($method) {
 function getTemplates($userId) {
     $db = getDB();
     
-    // Check if user is admin
-    $stmt = $db->prepare("SELECT username FROM users WHERE id = ?");
-    $stmt->execute([$userId]);
-    $user = $stmt->fetch();
-    $isAdmin = ($user && $user['username'] === 'admin');
+    $isAdmin = isAdminUser($userId);
     
     // Check if requesting all templates (for batch creation)
     $allTemplates = isset($_GET['all']) && $_GET['all'] === 'true';
@@ -88,11 +84,7 @@ function getTemplates($userId) {
 function getTemplate($userId, $id) {
     $db = getDB();
     
-    // Check if user is admin
-    $stmt = $db->prepare("SELECT username FROM users WHERE id = ?");
-    $stmt->execute([$userId]);
-    $user = $stmt->fetch();
-    $isAdmin = ($user && $user['username'] === 'admin');
+    $isAdmin = isAdminUser($userId);
     
     // Admin can access any template, others can only access their own
     if ($isAdmin) {
@@ -158,11 +150,17 @@ function updateTemplate($userId, $id) {
     $data = json_decode(file_get_contents('php://input'), true);
     
     $db = getDB();
-    
-    // Check ownership
-    $stmt = $db->prepare("SELECT id FROM templates WHERE id = ? AND user_id = ?");
-    $stmt->execute([$id, $userId]);
-    if (!$stmt->fetch()) {
+    $stmt = $db->prepare("SELECT id, user_id FROM templates WHERE id = ?");
+    $stmt->execute([$id]);
+    $template = $stmt->fetch();
+    if (!$template) {
+        sendError('Template not found', 404);
+    }
+
+    if ((int)$template['user_id'] !== (int)$userId) {
+        if (isAdminUser($userId)) {
+            sendError('Permission denied', 403);
+        }
         sendError('Template not found', 404);
     }
     
@@ -200,13 +198,19 @@ function updateTemplate($userId, $id) {
 
 function deleteTemplate($userId, $id) {
     $db = getDB();
-    
-    // Check ownership
-    $stmt = $db->prepare("SELECT name FROM templates WHERE id = ? AND user_id = ?");
-    $stmt->execute([$id, $userId]);
+
+    $stmt = $db->prepare("SELECT name, user_id FROM templates WHERE id = ?");
+    $stmt->execute([$id]);
     $template = $stmt->fetch();
     
     if (!$template) {
+        sendError('Template not found', 404);
+    }
+
+    if ((int)$template['user_id'] !== (int)$userId) {
+        if (isAdminUser($userId)) {
+            sendError('Permission denied', 403);
+        }
         sendError('Template not found', 404);
     }
     

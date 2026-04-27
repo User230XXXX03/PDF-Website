@@ -37,23 +37,11 @@
         <el-alert type="info" :closable="false" style="margin-bottom: 15px;">
           <p><strong>💡 Instructions:</strong></p>
           <ul style="margin: 5px 0; padding-left: 20px;">
-            <li v-if="!isPersonalizedTemplate"><strong>Recipients:</strong> Set uniformly, all recipients will receive the same email</li>
-            <li v-if="isPersonalizedTemplate"><strong>Personalized Sending:</strong> System will automatically get each person's email from the STUDENT_EMAIL field in data records</li>
+            <li><strong>Personalized Sending:</strong> System will automatically get each person's email from the email field in each data record</li>
             <li><strong>Subject/Content:</strong> Supports template variables like {{STUDENT_NAME}}, {{CLASS_NAME}}, etc.</li>
           </ul>
         </el-alert>
 
-        <el-form-item v-if="!isPersonalizedTemplate" label="Recipients (To)" prop="email_config.recipients">
-          <el-input
-            v-model="form.email_config.recipients"
-            placeholder="Multiple emails supported, separated by semicolons: student1@example.com;student2@example.com"
-            type="textarea"
-            :rows="2"
-          />
-          <div style="font-size: 12px; color: #909399; margin-top: 5px;">
-            💡 All recipients will receive the same email content
-          </div>
-        </el-form-item>
 
         <el-form-item label="Email Subject" prop="email_config.subject">
           <div class="email-field-group">
@@ -141,7 +129,7 @@
                 </el-button>
                 <el-button size="small" type="success" @click="generateTestData">
                   <el-icon><MagicStick /></el-icon>
-                  Generate Test Data
+                  Generate Test Data(Transcript)
                 </el-button>
                 <el-button size="small" type="warning" @click="clearAllRecords" :disabled="form.records.length === 0">
                   <el-icon><Delete /></el-icon>
@@ -163,6 +151,21 @@
               <!-- Index Column -->
               <el-table-column label="#" type="index" width="50" fixed="left" />
               
+              <!-- Recipient Email Column (always visible if template has no email variable) -->
+              <el-table-column
+                v-if="!hasEmailVariable"
+                label="Recipient Email"
+                min-width="200"
+              >
+                <template #default="{ row }">
+                  <el-input
+                    v-model="row._recipient_email"
+                    placeholder="Enter recipient email"
+                    size="small"
+                  />
+                </template>
+              </el-table-column>
+
               <!-- Data Field Columns -->
               <el-table-column
                 v-for="variable in selectedTemplate.variables"
@@ -226,7 +229,6 @@ const form = reactive({
   template_id: null,
   records: [],
   email_config: {
-    recipients: '',
     subject: '',
     body: ''
   }
@@ -241,11 +243,35 @@ const selectedTemplate = computed(() => {
   return templates.value.find(t => t.id === form.template_id)
 })
 
-// Check if it's a personalized template (transcript, each person receives their own)
-const isPersonalizedTemplate = computed(() => {
-  if (!selectedTemplate.value) return false
-  const type = selectedTemplate.value.set_type?.toLowerCase() || ''
-  return type === 'transcript'
+// Record-level sending: all template types read recipient data from each record
+const emailVariableNames = ['STUDENT_EMAIL', 'EMPLOYEE_EMAIL', 'USER_EMAIL', 'RECIPIENT_EMAIL', 'EMAIL']
+const nameVariableNames = ['STUDENT_NAME', 'EMPLOYEE_NAME', 'USER_FULL_NAME', 'RECIPIENT_NAME', 'NAME']
+
+function getRecordValue(record, variableNames) {
+  for (const key of variableNames) {
+    const value = record[key]
+    if (value !== undefined && value !== null) {
+      const text = String(value).trim()
+      if (text) return text
+    }
+  }
+  return ''
+}
+
+function getRecordEmail(record) {
+  return getRecordValue(record, emailVariableNames)
+}
+
+function getRecordName(record) {
+  return getRecordValue(record, nameVariableNames)
+}
+
+// Check if template variables already include an email field
+const hasEmailVariable = computed(() => {
+  if (!selectedTemplate.value || !selectedTemplate.value.variables) return false
+  return selectedTemplate.value.variables.some(v =>
+    v.toUpperCase().includes('EMAIL')
+  )
 })
 
 // Get available template variables - only show variables suitable for emails
@@ -262,10 +288,15 @@ const availableVariables = computed(() => {
     'STUDENT_NAME',
     'STUDENT_ID',
     'STUDENT_EMAIL',
+    // Payroll related
+    'EMPLOYEE_NAME',
+    'EMPLOYEE_EMAIL',
     // Certificate related
     'USER_FULL_NAME',
     'USER_EMAIL',
-    'RECIPIENT_NAME'
+    'RECIPIENT_NAME',
+    'RECIPIENT_EMAIL',
+    'EMAIL'
   ]
   
   return selectedTemplate.value.variables.filter(variable => {
@@ -324,13 +355,17 @@ async function loadBatch() {
       form.records = res.data.records || []
       
       // Load email configuration
-      form.email_config.recipients = res.data.email_recipients || ''
       form.email_config.subject = res.data.email_subject || ''
       form.email_config.body = res.data.email_body || ''
       
       // Convert data object to flat structure
       form.records = form.records.map(record => {
-        return { ...record.data, id: record.id }
+        const flat = { ...record.data, id: record.id }
+        // Restore recipient email from student_email column if template has no email variable
+        if (record.student_email && !flat._recipient_email) {
+          flat._recipient_email = record.student_email
+        }
+        return flat
       })
     }
   } catch (error) {
@@ -366,21 +401,19 @@ function addRecord() {
   variables.forEach(variable => {
     record[variable] = ''
   })
-  
-  // Set default email field name for email sending
-  if (variables.includes('USER_EMAIL')) {
+
+  // Always add recipient email field if template has no email variable
+  if (!hasEmailVariable.value) {
+    record._recipient_email = ''
+  }
+
+  // Initialize internal fields from any supported record-level email/name variable
+  if (emailVariableNames.some(variable => variables.includes(variable))) {
     record.student_email = ''
   }
-  if (variables.includes('USER_FULL_NAME')) {
+  if (nameVariableNames.some(variable => variables.includes(variable))) {
     record.student_name = ''
-  }
-  if (variables.includes('STUDENT_NAME')) {
-    record.student_name = ''
-  }
-  if (variables.includes('STUDENT_ID')) {
-    record.student_email = ''
-  }
-  
+  }  
   form.records.push(record)
   
   ElMessage.success('Record added, please fill in the data')
@@ -458,7 +491,6 @@ function generateTranscriptTestData(variables) {
   studentsData.sort((a, b) => b.total - a.total)
   
   // Generate a record for each student
-  const emails = []
   studentsData.forEach((student, index) => {
     const record = {}
     
@@ -473,7 +505,6 @@ function generateTranscriptTestData(variables) {
           break
         case 'STUDENT_EMAIL':
           record[variable] = student.email
-          emails.push(student.email)
           break
         case 'CHINESE':
           record[variable] = student.chinese
@@ -507,10 +538,6 @@ function generateTranscriptTestData(variables) {
     form.records.push(record)
   })
   
-  // Auto fill recipients list
-  if (emails.length > 0 && !form.email_config.recipients) {
-    form.email_config.recipients = emails.join(';')
-  }
   
   ElMessage.success(`Generated 10 test records (1 record per student, ranked by total score)`)
 }
@@ -594,12 +621,6 @@ function processImportedRecords(records) {
 
   form.records.push(...valid)
 
-  if (isPersonalizedTemplate.value) {
-    const emails = valid.map(r => r['STUDENT_EMAIL']).filter(e => e?.trim())
-    if (emails.length > 0 && !form.email_config.recipients) {
-      form.email_config.recipients = emails.join(';')
-    }
-  }
 
   ElMessage.success(`Successfully imported ${valid.length} records`)
   if (fileInputRef.value) fileInputRef.value.value = ''
@@ -685,18 +706,22 @@ async function handleSave() {
     
     loading.value = true
     try {
-      // Prepare records - ensure student_name and student_email are set
+      // Prepare records
       const records = form.records.map(record => {
         const data = { ...record }
         
-        // Map common variables to student_name and student_email
-        if (data.USER_FULL_NAME && !data.student_name) {
-          data.student_name = data.USER_FULL_NAME
+        // Map the record-level recipient email into the backend storage field
+        const recipientEmail = data._recipient_email || getRecordEmail(data)
+        if (recipientEmail) {
+          data.student_email = recipientEmail
         }
-        if (data.USER_EMAIL && !data.student_email) {
-          data.student_email = data.USER_EMAIL
-        }
-        
+        delete data._recipient_email
+
+        // Map the record-level recipient name into the backend storage field
+        const recipientName = getRecordName(data)
+        if (recipientName && !data.student_name) {
+          data.student_name = recipientName
+        }        
         return data
       })
       
@@ -704,7 +729,6 @@ async function handleSave() {
       if (isEdit.value) {
         res = await updateBatch(route.params.id, {
           name: form.name,
-          email_recipients: form.email_config.recipients || null,
           email_subject: form.email_config.subject || null,
           email_body: form.email_config.body || null,
           records: records
@@ -713,7 +737,6 @@ async function handleSave() {
         res = await createBatch({
           name: form.name,
           template_id: form.template_id,
-          email_recipients: form.email_config.recipients || null,
           email_subject: form.email_config.subject || null,
           email_body: form.email_config.body || null,
           records: records

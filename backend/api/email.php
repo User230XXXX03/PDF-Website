@@ -49,7 +49,7 @@ switch ($action) {
 function sendBatchEmails($userId, $batchId) {
     $db = getDB();
     
-    // Get batch (including email_recipients for non-personalized templates)
+    // Get batch and template metadata
     $stmt = $db->prepare("
         SELECT b.*, t.name as template_name, t.set_type as template_type
         FROM batches b
@@ -85,149 +85,52 @@ function sendBatchEmails($userId, $batchId) {
     $failCount = 0;
     
     foreach ($records as $record) {
-        // Parse record data
-        $recordData = [];
-        if (!empty($record['data'])) {
-            $recordData = is_string($record['data']) ? json_decode($record['data'], true) : $record['data'];
+        $templateType = $batch['template_type'] ?? '';
+        [$personEmail, $personName, $personId] = getEmailRecipient($record, $templateType);
+        
+        if (empty($personEmail)) {
+            $failCount++;
+            error_log("Email send skipped: No email found for record {$record['id']}, template type: {$templateType}");
+            continue;
         }
         
-        // Check if this is a class transcript (contains multiple students)
-        $isClassTranscript = isset($recordData['STUDENT_1_ID']);
+        $record['student_email'] = $personEmail;
+        $record['student_name'] = $personName;
+        $record['student_id'] = $personId;
         
-        if ($isClassTranscript) {
-            // Class transcript: send individual email to each student
-            for ($i = 1; $i <= 10; $i++) {
-                $studentEmailKey = "STUDENT_{$i}_EMAIL";
-                $studentEmail = $recordData[$studentEmailKey] ?? '';
-                
-                if (empty($studentEmail)) {
-                    continue; // Skip students without email
-                }
-                
-                // Create a copy of the record for this student
-                $studentRecord = $record;
-                $studentRecord['student_email'] = $studentEmail;
-                $studentRecord['student_name'] = $recordData["STUDENT_{$i}_NAME"] ?? '';
-                $studentRecord['student_id'] = $recordData["STUDENT_{$i}_ID"] ?? '';
-                
-                try {
-                    sendEmail($settings, $studentRecord, $batch);
-                    $successCount++;
-                    
-                    // Log successful email send
-                    logActivity(
-                        $userId, 
-                        $batchId, 
-                        'email', 
-                        "Email sent to {$studentRecord['student_name']}",
-                        ['record_id' => $record['id'], 'student_index' => $i],
-                        $record['id'],
-                        $studentRecord['student_name'],
-                        $studentEmail
-                    );
-                } catch (Exception $e) {
-                    $failCount++;
-                    logActivity(
-                        $userId, 
-                        $batchId, 
-                        'error', 
-                        "Email send failed for {$studentRecord['student_name']}", 
-                        [
-                            'error' => $e->getMessage(),
-                            'record_id' => $record['id'],
-                            'student_index' => $i
-                        ],
-                        $record['id'],
-                        $studentRecord['student_name'],
-                        $studentEmail
-                    );
-                }
-            }
+        try {
+            sendEmail($settings, $record, $batch);
             
-            // Mark record as sent (if at least one succeeded)
-            if ($successCount > 0) {
-                $stmt = $db->prepare("UPDATE batch_records SET email_sent = 1 WHERE id = ?");
-                $stmt->execute([$record['id']]);
-            }
-        } else {
-            // Standard template: single record
-            // Get correct email and name fields based on template type
-            $templateType = $batch['template_type'] ?? '';
-            $personEmail = '';
-            $personName = '';
-            $personId = '';
+            $stmt = $db->prepare("UPDATE batch_records SET email_sent = 1 WHERE id = ?");
+            $stmt->execute([$record['id']]);
             
-            // Select variables based on template type
-            switch ($templateType) {
-                case 'Payroll':
-                    $personEmail = $recordData['EMPLOYEE_EMAIL'] ?? $record['student_email'] ?? '';
-                    $personName = $recordData['EMPLOYEE_NAME'] ?? $record['student_name'] ?? '';
-                    $personId = $recordData['EMPLOYEE_ID'] ?? $record['student_id'] ?? '';
-                    break;
-                case 'Transcript':
-                    $personEmail = $recordData['STUDENT_EMAIL'] ?? $record['student_email'] ?? '';
-                    $personName = $recordData['STUDENT_NAME'] ?? $record['student_name'] ?? '';
-                    $personId = $recordData['STUDENT_ID'] ?? $record['student_id'] ?? '';
-                    break;
-                case 'Certificate':
-                    $personEmail = $recordData['USER_EMAIL'] ?? $recordData['RECIPIENT_EMAIL'] ?? $record['student_email'] ?? '';
-                    $personName = $recordData['USER_FULL_NAME'] ?? $recordData['RECIPIENT_NAME'] ?? $record['student_name'] ?? '';
-                    $personId = $recordData['USER_ID'] ?? $record['student_id'] ?? '';
-                    break;
-                default:
-                    // Try all possible email fields
-                    $personEmail = $recordData['EMPLOYEE_EMAIL'] ?? $recordData['STUDENT_EMAIL'] ?? $recordData['USER_EMAIL'] ?? $record['student_email'] ?? '';
-                    $personName = $recordData['EMPLOYEE_NAME'] ?? $recordData['STUDENT_NAME'] ?? $recordData['USER_FULL_NAME'] ?? $record['student_name'] ?? '';
-                    $personId = $recordData['EMPLOYEE_ID'] ?? $recordData['STUDENT_ID'] ?? $recordData['USER_ID'] ?? $record['student_id'] ?? '';
-            }
+            logActivity(
+                $userId, 
+                $batchId, 
+                'email', 
+                "Email sent to {$personName}",
+                ['record_id' => $record['id']],
+                $record['id'],
+                $personName,
+                $personEmail
+            );
             
-            if (empty($personEmail)) {
-                $failCount++;
-                error_log("Email send skipped: No email found for record {$record['id']}, template type: {$templateType}");
-                continue;
-            }
-            
-            // Update record object to ensure email is sent with correct info
-            $record['student_email'] = $personEmail;
-            $record['student_name'] = $personName;
-            $record['student_id'] = $personId;
-            
-            try {
-                sendEmail($settings, $record, $batch);
-                
-                // Update record
-                $stmt = $db->prepare("UPDATE batch_records SET email_sent = 1 WHERE id = ?");
-                $stmt->execute([$record['id']]);
-                
-                // Log successful email send
-                logActivity(
-                    $userId, 
-                    $batchId, 
-                    'email', 
-                    "Email sent to {$personName}",
-                    ['record_id' => $record['id']],
-                    $record['id'],
-                    $personName,
-                    $personEmail
-                );
-                
-                $successCount++;
-            } catch (Exception $e) {
-                $failCount++;
-                logActivity(
-                    $userId, 
-                    $batchId, 
-                    'error', 
-                    "Email send failed for {$personName}", 
-                    [
-                        'error' => $e->getMessage(),
-                        'record_id' => $record['id']
-                    ],
-                    $record['id'],
-                    $personName,
-                    $personEmail
-                );
-            }
+            $successCount++;
+        } catch (Exception $e) {
+            $failCount++;
+            logActivity(
+                $userId, 
+                $batchId, 
+                'error', 
+                "Email send failed for {$personName}", 
+                [
+                    'error' => $e->getMessage(),
+                    'record_id' => $record['id']
+                ],
+                $record['id'],
+                $personName,
+                $personEmail
+            );
         }
     }
     
@@ -265,46 +168,13 @@ function sendRecordEmail($userId, $recordId) {
         sendError('PDF not generated yet', 400);
     }
     
-    // Parse record data
-    $recordData = [];
-    if (!empty($record['data'])) {
-        $recordData = is_string($record['data']) ? json_decode($record['data'], true) : $record['data'];
-    }
-    
-    // Get correct email and name fields based on template type
     $templateType = $record['template_type'] ?? '';
-    $personEmail = '';
-    $personName = '';
-    $personId = '';
-    
-    switch ($templateType) {
-        case 'Payroll':
-            $personEmail = $recordData['EMPLOYEE_EMAIL'] ?? $record['student_email'] ?? '';
-            $personName = $recordData['EMPLOYEE_NAME'] ?? $record['student_name'] ?? '';
-            $personId = $recordData['EMPLOYEE_ID'] ?? $record['student_id'] ?? '';
-            break;
-        case 'Transcript':
-            $personEmail = $recordData['STUDENT_EMAIL'] ?? $record['student_email'] ?? '';
-            $personName = $recordData['STUDENT_NAME'] ?? $record['student_name'] ?? '';
-            $personId = $recordData['STUDENT_ID'] ?? $record['student_id'] ?? '';
-            break;
-        case 'Certificate':
-            $personEmail = $recordData['USER_EMAIL'] ?? $recordData['RECIPIENT_EMAIL'] ?? $record['student_email'] ?? '';
-            $personName = $recordData['USER_FULL_NAME'] ?? $recordData['RECIPIENT_NAME'] ?? $record['student_name'] ?? '';
-            $personId = $recordData['USER_ID'] ?? $record['student_id'] ?? '';
-            break;
-        default:
-            // Try all possible email fields
-            $personEmail = $recordData['EMPLOYEE_EMAIL'] ?? $recordData['STUDENT_EMAIL'] ?? $recordData['USER_EMAIL'] ?? $record['student_email'] ?? '';
-            $personName = $recordData['EMPLOYEE_NAME'] ?? $recordData['STUDENT_NAME'] ?? $recordData['USER_FULL_NAME'] ?? $record['student_name'] ?? '';
-            $personId = $recordData['EMPLOYEE_ID'] ?? $recordData['STUDENT_ID'] ?? $recordData['USER_ID'] ?? $record['student_id'] ?? '';
-    }
+    [$personEmail, $personName, $personId] = getEmailRecipient($record, $templateType);
     
     if (empty($personEmail)) {
         sendError('No email address found for this record (template type: ' . $templateType . ')', 400);
     }
     
-    // Update record object
     $record['student_email'] = $personEmail;
     $record['student_name'] = $personName;
     $record['student_id'] = $personId;
@@ -359,6 +229,40 @@ function sendRecordEmail($userId, $recordId) {
     }
 }
 
+function getEmailRecipient($record, $templateType) {
+    $recordData = [];
+    if (!empty($record['data'])) {
+        $recordData = is_string($record['data']) ? json_decode($record['data'], true) : $record['data'];
+    }
+    
+    switch ($templateType) {
+        case 'Payroll':
+            return [
+                $recordData['EMPLOYEE_EMAIL'] ?? $record['student_email'] ?? '',
+                $recordData['EMPLOYEE_NAME'] ?? $record['student_name'] ?? '',
+                $recordData['EMPLOYEE_ID'] ?? $record['student_id'] ?? ''
+            ];
+        case 'Transcript':
+            return [
+                $recordData['STUDENT_EMAIL'] ?? $record['student_email'] ?? '',
+                $recordData['STUDENT_NAME'] ?? $record['student_name'] ?? '',
+                $recordData['STUDENT_ID'] ?? $record['student_id'] ?? ''
+            ];
+        case 'Certificate':
+            return [
+                $recordData['USER_EMAIL'] ?? $recordData['RECIPIENT_EMAIL'] ?? $record['student_email'] ?? '',
+                $recordData['USER_FULL_NAME'] ?? $recordData['RECIPIENT_NAME'] ?? $record['student_name'] ?? '',
+                $recordData['USER_ID'] ?? $record['student_id'] ?? ''
+            ];
+        default:
+            return [
+                $recordData['EMPLOYEE_EMAIL'] ?? $recordData['STUDENT_EMAIL'] ?? $recordData['USER_EMAIL'] ?? $recordData['RECIPIENT_EMAIL'] ?? $recordData['EMAIL'] ?? $record['student_email'] ?? '',
+                $recordData['EMPLOYEE_NAME'] ?? $recordData['STUDENT_NAME'] ?? $recordData['USER_FULL_NAME'] ?? $recordData['RECIPIENT_NAME'] ?? $recordData['NAME'] ?? $record['student_name'] ?? '',
+                $recordData['EMPLOYEE_ID'] ?? $recordData['STUDENT_ID'] ?? $recordData['USER_ID'] ?? $record['student_id'] ?? ''
+            ];
+    }
+}
+
 function sendEmail($settings, $record, $batch) {
     $mail = new PHPMailer(true);
     
@@ -394,21 +298,11 @@ function sendEmail($settings, $record, $batch) {
     // Recipients
     $mail->setFrom($settings['from_email'], $settings['from_name']);
     
-    // Prefer record's student_email, fall back to batch email_recipients
-    if (!empty($record['student_email'])) {
-        // Personalized send: use student_email from record
-        $mail->addAddress($record['student_email'], $record['student_name'] ?? '');
-    } elseif (!empty($batch['email_recipients'])) {
-        // Batch send: use batch email_recipients
-        $toEmails = array_map('trim', explode(';', $batch['email_recipients']));
-        foreach ($toEmails as $toEmail) {
-            if (!empty($toEmail) && filter_var($toEmail, FILTER_VALIDATE_EMAIL)) {
-                $mail->addAddress($toEmail);
-            }
-        }
-    } else {
-        throw new Exception('No recipients configured: neither student email nor batch recipients found');
+    // Record-level sending: every email must come from the current record.
+    if (empty($record['student_email'])) {
+        throw new Exception('No recipient email found for this record');
     }
+    $mail->addAddress($record['student_email'], $record['student_name'] ?? '');
     
     // Attach PDF
     $filepath = UPLOAD_DIR . $record['pdf_path'];
@@ -442,6 +336,8 @@ function sendEmail($settings, $record, $batch) {
         if (!isset($recordData['STUDENT_NAME'])) $recordData['STUDENT_NAME'] = $record['student_name'];
         if (!isset($recordData['EMPLOYEE_NAME'])) $recordData['EMPLOYEE_NAME'] = $record['student_name'];
         if (!isset($recordData['USER_FULL_NAME'])) $recordData['USER_FULL_NAME'] = $record['student_name'];
+        if (!isset($recordData['RECIPIENT_NAME'])) $recordData['RECIPIENT_NAME'] = $record['student_name'];
+        if (!isset($recordData['NAME'])) $recordData['NAME'] = $record['student_name'];
     }
     
     if (!empty($record['student_id'])) {
@@ -454,15 +350,14 @@ function sendEmail($settings, $record, $batch) {
         if (!isset($recordData['STUDENT_EMAIL'])) $recordData['STUDENT_EMAIL'] = $record['student_email'];
         if (!isset($recordData['EMPLOYEE_EMAIL'])) $recordData['EMPLOYEE_EMAIL'] = $record['student_email'];
         if (!isset($recordData['USER_EMAIL'])) $recordData['USER_EMAIL'] = $record['student_email'];
+        if (!isset($recordData['RECIPIENT_EMAIL'])) $recordData['RECIPIENT_EMAIL'] = $record['student_email'];
+        if (!isset($recordData['EMAIL'])) $recordData['EMAIL'] = $record['student_email'];
     }
     
     // Replace template variables
     if ($recordData) {
-        foreach ($recordData as $key => $value) {
-            $placeholder = '{{' . $key . '}}';
-            $subject = str_replace($placeholder, $value, $subject);
-            $body = str_replace($placeholder, $value, $body);
-        }
+        $subject = replacePlaceholders($subject, $recordData);
+        $body = replacePlaceholders($body, $recordData);
     }
     
     // Content

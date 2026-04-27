@@ -12,6 +12,17 @@ function isAuthFormRequest(config) {
   return url.includes('/auth.php?action=login') || url.includes('/auth.php?action=register')
 }
 
+// Request interceptor
+request.interceptors.request.use(
+  config => {
+    return config
+  },
+  error => {
+    console.error('Request error:', error)
+    return Promise.reject(error)
+  }
+)
+
 // Response interceptor
 request.interceptors.response.use(
   response => {
